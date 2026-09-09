@@ -104,8 +104,6 @@ public:
 
   int getSpeed() { return speed; }
 
-protected:
-
   bool getRun() { return run; }
 
   bool hasReset() { 

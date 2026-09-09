@@ -1,6 +1,6 @@
 #pragma once
 #include "../matricableLed/StripLed.h"
-#include "../matricableLed/CSource.h"
+#include "CSource.h"
 #include <Esp_Lite_Core.h>
 #include "soc/soc_caps.h"
 

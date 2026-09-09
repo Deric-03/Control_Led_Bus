@@ -2,7 +2,7 @@
 #include <WiFi.h>
 #include <AsyncUDP.h>
 #include <Esp_Lite_Core.h>
-#include "../matricableLed/CSource.h"
+#include "CSource.h"
 
 class CArtnet : public CSource {
 private:

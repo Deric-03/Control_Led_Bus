@@ -1,7 +1,7 @@
 #pragma once
-#include "esp_dmx.h"
+#include "../third_party/esp_dmx/esp_dmx.h"
 #include <Esp_Lite_Core.h>
-#include "../matricableLed/CSource.h"
+#include "CSource.h"
 
 class CDmx : public CSource {
 private:
