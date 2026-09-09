@@ -132,6 +132,10 @@ public:
         dmx_present = true;
       }
 
+      // Presence deja actee : on jette le paquet, pas l'emetteur.
+      if (pkt.err != DMX_OK) return;
+      if (pkt.sc != DMX_SC) return;   // start code nul = niveaux, 0xCC = RDM
+
       dmx_read(DMX_PORT, back, size);
       publish();
 
