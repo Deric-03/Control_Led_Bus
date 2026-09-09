@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include "Color.h"
 
 enum Form {
   Sinus,
@@ -10,8 +11,6 @@ enum Form {
 };
 
 struct Align { int from = 0; int to = 0; };
-
-struct Color { int r = 0; int g = 0; int b = 0; int w = 0; };
 
 struct Courbe {
   Form form = Sinus;

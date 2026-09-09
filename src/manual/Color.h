@@ -1,0 +1,4 @@
+#pragma once
+#include <Arduino.h>
+
+struct Color { int r = 0; int g = 0; int b = 0; int w = 0; };
