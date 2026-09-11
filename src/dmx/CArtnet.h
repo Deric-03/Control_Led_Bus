@@ -1,5 +1,5 @@
 #pragma once
-#include <WiFi.h>
+#include <Wifi_Lite_Esp.h>
 #include <AsyncUDP.h>
 #include <Esp_Lite_Core.h>
 #include "CSource.h"

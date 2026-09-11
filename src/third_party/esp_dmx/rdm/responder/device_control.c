@@ -1,8 +1,8 @@
-#include "rdm/responder/include/device_control.h"
+#include "include/device_control.h"
 
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
-#include "rdm/responder/include/utils.h"
+#include "../../dmx/include/driver.h"
+#include "../../dmx/include/service.h"
+#include "include/utils.h"
 
 static size_t rdm_rhd_set_reset_device(
     dmx_port_t dmx_num, const rdm_parameter_definition_t *definition,

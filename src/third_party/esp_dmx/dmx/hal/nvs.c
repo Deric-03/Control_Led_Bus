@@ -1,7 +1,7 @@
 #include "include/nvs.h"
 
-#include "dmx/include/service.h"
-#include "esp_dmx.h"
+#include "../include/service.h"
+#include "../../esp_dmx.h"
 #include "nvs_flash.h"
 
 #ifndef CONFIG_DMX_NVS_PARTITION_NAME

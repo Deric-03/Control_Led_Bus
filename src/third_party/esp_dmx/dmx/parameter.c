@@ -2,10 +2,10 @@
 
 #include <string.h>
 
-#include "dmx/hal/include/nvs.h"
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
-#include "rdm/include/driver.h"
+#include "hal/include/nvs.h"
+#include "include/driver.h"
+#include "include/service.h"
+#include "../rdm/include/driver.h"
 
 int dmx_sub_device_get_count(dmx_port_t dmx_num) {
   assert(dmx_num < DMX_NUM_MAX);

@@ -1,13 +1,13 @@
-#include "rdm/responder/include/sensor_parameter.h"
+#include "include/sensor_parameter.h"
 
 #include <string.h>
 
-#include "dmx/include/driver.h"
-#include "dmx/include/parameter.h"
-#include "dmx/include/service.h"
-#include "dmx/include/types.h"
-#include "rdm/include/driver.h"
-#include "rdm/responder/include/utils.h"
+#include "../../dmx/include/driver.h"
+#include "../../dmx/include/parameter.h"
+#include "../../dmx/include/service.h"
+#include "../../dmx/include/types.h"
+#include "../include/driver.h"
+#include "include/utils.h"
 
 typedef struct rdm_sensors_t {
   uint8_t sensor_count;

@@ -8,12 +8,12 @@
 
 #include <stdint.h>
 
-#include "dmx/include/parameter.h"
-#include "dmx/include/types.h"
+#include "parameter.h"
+#include "types.h"
 #include "esp_check.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
-#include "rdm/responder/include/utils.h"
+#include "../../rdm/responder/include/utils.h"
 
 #ifdef __cplusplus
 extern "C" {

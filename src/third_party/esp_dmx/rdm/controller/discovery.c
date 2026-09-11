@@ -1,10 +1,10 @@
 #include "include/discovery.h"
 
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
-#include "rdm/controller/include/utils.h"
-#include "rdm/include/driver.h"
-#include "rdm/include/uid.h"
+#include "../../dmx/include/driver.h"
+#include "../../dmx/include/service.h"
+#include "include/utils.h"
+#include "../include/driver.h"
+#include "../include/uid.h"
 
 bool rdm_send_disc_unique_branch(dmx_port_t dmx_num,
                                  const rdm_disc_unique_branch_t *branch,

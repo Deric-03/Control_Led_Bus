@@ -1,10 +1,10 @@
-#include "dmx/include/device.h"
+#include "include/device.h"
 
-#include "dmx/hal/include/nvs.h"
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
-#include "rdm/responder/include/dmx_setup.h"
-#include "rdm/responder/include/utils.h"
+#include "hal/include/nvs.h"
+#include "include/driver.h"
+#include "include/service.h"
+#include "../rdm/responder/include/dmx_setup.h"
+#include "../rdm/responder/include/utils.h"
 
 uint16_t dmx_get_start_address(dmx_port_t dmx_num) {
   DMX_CHECK(dmx_num < DMX_NUM_MAX, 0, "dmx_num error");

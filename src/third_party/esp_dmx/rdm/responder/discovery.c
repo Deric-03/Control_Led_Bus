@@ -2,11 +2,11 @@
 
 #include <string.h>
 
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
+#include "../../dmx/include/driver.h"
+#include "../../dmx/include/service.h"
 #include "include/utils.h"
-#include "rdm/include/driver.h"
-#include "rdm/include/uid.h"
+#include "../include/driver.h"
+#include "../include/uid.h"
 
 static size_t rdm_rhd_discovery(dmx_port_t dmx_num,
                                 const rdm_parameter_definition_t *definition,

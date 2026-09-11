@@ -2,10 +2,10 @@
 
 #include <string.h>
 
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
-#include "rdm/include/driver.h"
-#include "rdm/responder/include/utils.h"
+#include "../../dmx/include/driver.h"
+#include "../../dmx/include/service.h"
+#include "../include/driver.h"
+#include "include/utils.h"
 
 static size_t rdm_rhd_get_supported_parameters(
     dmx_port_t dmx_num, const rdm_parameter_definition_t *definition,

@@ -1,11 +1,11 @@
 #include "include/uart.h"
 
-#include "dmx/hal/include/timer.h"
-#include "dmx/include/service.h"
+#include "include/timer.h"
+#include "../include/service.h"
 #include "driver/uart.h"
 #include "endian.h"
-#include "rdm/include/driver.h"
-#include "rdm/include/uid.h"
+#include "../../rdm/include/driver.h"
+#include "../../rdm/include/uid.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 #include "esp_private/esp_clk.h"

@@ -1,8 +1,8 @@
-#include "dmx/include/service.h"
+#include "include/service.h"
 
 #include <string.h>
 
-#include "dmx/include/driver.h"
+#include "include/driver.h"
 
 dmx_device_t *dmx_device_get(dmx_port_t dmx_num, dmx_device_num_t device_num) {
   assert(dmx_num < DMX_NUM_MAX);

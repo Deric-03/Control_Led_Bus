@@ -2,8 +2,8 @@
 
 #include <stdbool.h>
 
-#include "dmx/hal/include/uart.h"
-#include "dmx/include/service.h"
+#include "include/uart.h"
+#include "../include/service.h"
 #include "driver/gpio.h"
 
 static struct dmx_timer_t {

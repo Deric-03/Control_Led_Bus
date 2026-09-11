@@ -2,11 +2,11 @@
 
 #include <string.h>
 
-#include "dmx/hal/include/nvs.h"
-#include "dmx/include/device.h"
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
-#include "rdm/responder/include/utils.h"
+#include "../../dmx/hal/include/nvs.h"
+#include "../../dmx/include/device.h"
+#include "../../dmx/include/driver.h"
+#include "../../dmx/include/service.h"
+#include "include/utils.h"
 
 /** @brief Product information used in the RDM_PID_DEVICE_INFO parameter. All
  * other fields in RDM_PID_DEVICE_INFO can be computed at call-time.

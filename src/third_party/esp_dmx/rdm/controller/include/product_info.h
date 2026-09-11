@@ -13,9 +13,9 @@
 
 #include <stdint.h>
 
-#include "dmx/include/types.h"
-#include "rdm/controller.h"
-#include "rdm/include/types.h"
+#include "../../../dmx/include/types.h"
+#include "../../controller.h"
+#include "../../include/types.h"
 
 #ifdef __cplusplus
 extern "C" {

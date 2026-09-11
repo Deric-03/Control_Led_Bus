@@ -2,9 +2,9 @@
 
 #include <string.h>
 
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
-#include "rdm/include/uid.h"
+#include "../../dmx/include/driver.h"
+#include "../../dmx/include/service.h"
+#include "../include/uid.h"
 
 size_t rdm_write_ack(dmx_port_t dmx_num, const rdm_header_t *header,
                      const char *format, const void *pd, size_t pdl) {

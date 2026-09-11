@@ -1,15 +1,15 @@
 #include <string.h>
 
-#include "dmx/hal/include/gpio.h"
-#include "dmx/hal/include/nvs.h"
-#include "dmx/hal/include/timer.h"
-#include "dmx/hal/include/uart.h"
-#include "dmx/include/driver.h"
-#include "dmx/include/parameter.h"
-#include "dmx/include/service.h"
-#include "rdm/include/driver.h"
-#include "rdm/include/uid.h"
-#include "rdm/responder/include/utils.h"
+#include "hal/include/gpio.h"
+#include "hal/include/nvs.h"
+#include "hal/include/timer.h"
+#include "hal/include/uart.h"
+#include "include/driver.h"
+#include "include/parameter.h"
+#include "include/service.h"
+#include "../rdm/include/driver.h"
+#include "../rdm/include/uid.h"
+#include "../rdm/responder/include/utils.h"
 
 size_t dmx_read_offset(dmx_port_t dmx_num, size_t offset, void *destination,
                        size_t size) {

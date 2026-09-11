@@ -27,7 +27,7 @@ private:
   struct StripSlot {
     StripLed* strip = nullptr;
     int addr  = 1;
-    int group = 1;            // LEDs consecutives partageant la meme couleur
+    float group = 1.0f;       // LEDs consecutives partageant la meme couleur
     int space = 0;            // LEDs eteintes entre deux groupes
     uint8_t*  targ = nullptr; // valeur DMX visee, 0-255 par canal
     uint16_t* cur  = nullptr; // valeur affichee, virgule fixe 8.8
@@ -54,19 +54,56 @@ private:
     return slot[index].strip != nullptr;
   }
 
-  void readSlot(int s, int Group, int Space, int Addr, int Snap) {
+  /*
+    Nombre de zones pour un motif donne.
+
+    Group est fractionnaire : au lieu d'imposer une taille fixe et de laisser
+    un reste en fin de ruban, on calcule combien de zones tiennent dans la
+    longueur, puis on leur repartit les LEDs au plus juste. Avec 131 LEDs et
+    Group = 6.55 on obtient 20 zones, alternant 7 et 6 LEDs.
+  */
+  int zonesFor(float Group, int Space, int size) {
+    float period = Group + (float)Space;
+    if (period <= 0.0f || size < 1) return 0;
+    int z = (int)(size / period + 0.5f);
+    if (z < 1) z = 1;
+    if (z > size) z = size;
+    return z;
+  }
+
+  /*
+    Premiere LED de la zone n.
+
+    Les bornes sont construites en miroir autour du centre du ruban : la
+    seconde moitie est le reflet exact de la premiere. Deux consequences --
+    le motif est symetrique vu depuis le milieu, et les tailles alternent
+    au lieu de grouper les grandes zones d'un cote.
+
+    L'arrondi ne peut etre parfait que si la longueur et le nombre de zones
+    ont la meme parite : la somme des tailles d'un motif symetrique a nombre
+    de zones pair est forcement paire. Quand ce n'est pas le cas, il reste
+    une LED d'ecart, placee au centre plutot que laissee en bout de ruban.
+
+      131 LEDs, 20 zones -> 7,6,7,6,7,6,7,6,7,6 | 7,7,6,7,6,7,6,7,6,7
+      140 LEDs, 21 zones -> parfaitement symetrique
+  */
+  static int zoneStart(int n, int zones, int size) {
+    if (n * 2 < zones) return (int)(((long)n * size + zones / 2) / zones);
+    if (n * 2 > zones) return size - (int)(((long)(zones - n) * size + zones / 2) / zones);
+    return size / 2;   // borne centrale, uniquement si zones est pair
+  }
+
+  void readSlot(int s, float Group, int Space, int Addr, int Snap) {
 
     StripSlot& sl = slot[s];
-    int period = Group + Space;   // motif complet : groupe allume + espacement
-    int n = 0;                    // index de la zone pilotee
+    int zones = zonesFor(Group, Space, sl.strip->getStripSize());
 
-    for (int start = 0; start < sl.strip->getStripSize(); start += period) {
+    for (int n = 0; n < zones; n++) {
 
       int c = n * 4;
       if (c + 3 >= sl.nCh) return;
 
       int dmx_i = (n * 4) + Addr;
-      n++;
 
       for (int k = 0; k < 4; k++) {
         uint8_t nt = dmx->getChanel(dmx_i + k);
@@ -98,18 +135,17 @@ private:
     sl.cur[c] += move;
   }
 
-  void renderSlot(int s, int Group, int Space, int Alpha, bool Gamma) {
+  void renderSlot(int s, float Group, int Space, int Alpha, bool Gamma) {
 
     StripSlot& sl = slot[s];
-    int period = Group + Space;
     int size = sl.strip->getStripSize();
-    int n = 0;
+    int zones = zonesFor(Group, Space, size);
+    float period = Group + (float)Space;
 
-    for (int start = 0; start < size; start += period) {
+    for (int n = 0; n < zones; n++) {
 
       int c = n * 4;
       if (c + 3 >= sl.nCh) break;
-      n++;
 
       stepChannel(sl, c,     Alpha);
       stepChannel(sl, c + 1, Alpha);
@@ -128,14 +164,28 @@ private:
         w = sl.strip->gamma8(w);
       }
 
-      // Le groupe recoit la couleur de la zone.
-      for (int i = start; i < start + Group && i < size; i++) {
+      // Bornes de la zone. Leur largeur peut varier d'une LED d'une zone a
+      // l'autre quand Group est fractionnaire, c'est le principe.
+      int start = zoneStart(n, zones, size);
+      int end   = zoneStart(n + 1, zones, size);
+      int span  = end - start;
+      if (span < 1) continue;
+
+      // Part allumee de la zone, le reste servant d'espacement.
+      int lit = span;
+      if (Space > 0) {
+        lit = (int)(span * Group / period + 0.5f);
+        if (lit < 1) lit = 1;
+        if (lit > span) lit = span;
+      }
+
+      for (int i = start; i < start + lit; i++) {
         sl.strip->setPixel(i, r, g, b, w);
       }
 
       // L'espacement est eteint explicitement : sinon les LEDs gardent
       // leur ancienne valeur quand group ou space change en cours de route.
-      for (int i = start + Group; i < start + period && i < size; i++) {
+      for (int i = start + lit; i < end; i++) {
         sl.strip->setPixel(i, 0, 0, 0, 0);
       }
     }
@@ -177,7 +227,7 @@ public:
 
     sl.strip = Strip;
     sl.addr  = (Addr >= 1 && Addr <= dmx->getMaxChanel()) ? Addr : 1;
-    sl.group = 1;
+    sl.group = 1.0f;
     sl.space = 0;
 
     return true;
@@ -200,18 +250,25 @@ public:
     return out;
   }
 
-  // Nombre de LEDs consecutives pilotees ensemble par une meme zone.
-  void setPixGroup(int index, int Group) {
+  /*
+    Nombre de LEDs par zone. Accepte une valeur fractionnaire : les zones se
+    repartissent alors les LEDs au plus juste, certaines en comptant une de
+    plus que les autres, sans jamais laisser de reste en fin de ruban.
+
+      setPixGroup(0, 7)      -> 140 LEDs = 20 zones de 7
+      setPixGroup(0, 6.55f)  -> 131 LEDs = 20 zones alternant 7 et 6
+  */
+  void setPixGroup(int index, float Group) {
     if (!validIndex(index)) return;
-    if (Group < 1) return;
+    if (Group < 0.01f) return;
     MutexLock lock(ParamMtx);
     slot[index].group = Group;
   }
 
-  int getPixGroup(int index) {
-    if (!validIndex(index)) return 0;
+  float getPixGroup(int index) {
+    if (!validIndex(index)) return 0.0f;
     MutexLock lock(ParamMtx);
-    int out = slot[index].group;
+    float out = slot[index].group;
     return out;
   }
 
@@ -233,13 +290,15 @@ public:
   // Zones pilotees et canaux consommes par un ruban.
   int getZoneCount(int index) {
     if (!validIndex(index)) return 0;
-    int period, size;
+    float Group;
+    int Space, size;
     {
       MutexLock lock(ParamMtx);
-      period = slot[index].group + slot[index].space;
-      size = slot[index].strip->getStripSize();
+      Group = slot[index].group;
+      Space = slot[index].space;
+      size  = slot[index].strip->getStripSize();
     }
-    return (size + period - 1) / period;
+    return zonesFor(Group, Space, size);
   }
 
   int getFootprint(int index) { return getZoneCount(index) * 4; }
@@ -335,7 +394,8 @@ public:
     // travail, seulement le temps de recopier quelques entiers.
     int Inter, Alpha, Snap;
     bool Gamma;
-    int Group[MAX_STRIP], Space[MAX_STRIP], Addr[MAX_STRIP];
+    float Group[MAX_STRIP];
+    int Space[MAX_STRIP], Addr[MAX_STRIP];
     {
       MutexLock lock(ParamMtx);
       Inter = inter;

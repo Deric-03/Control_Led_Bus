@@ -1,13 +1,13 @@
-#include "rdm/responder/include/dmx_setup.h"
+#include "include/dmx_setup.h"
 
 #include <string.h>
 
-#include "dmx/hal/include/nvs.h"
-#include "dmx/include/device.h"
-#include "dmx/include/driver.h"
-#include "dmx/include/service.h"
-#include "rdm/include/driver.h"
-#include "rdm/responder/include/utils.h"
+#include "../../dmx/hal/include/nvs.h"
+#include "../../dmx/include/device.h"
+#include "../../dmx/include/driver.h"
+#include "../../dmx/include/service.h"
+#include "../include/driver.h"
+#include "include/utils.h"
 
 static size_t rdm_rhd_set_dmx_personality(
     dmx_port_t dmx_num, const rdm_parameter_definition_t *definition,

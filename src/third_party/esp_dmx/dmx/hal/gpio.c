@@ -1,8 +1,8 @@
 #include "include/gpio.h"
 
-#include "dmx/hal/include/timer.h"
-#include "dmx/hal/include/uart.h"
-#include "dmx/include/service.h"
+#include "include/timer.h"
+#include "include/uart.h"
+#include "../include/service.h"
 #include "hal/gpio_hal.h"
 
 struct dmx_gpio_t {
