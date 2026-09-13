@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <new>
 #include <Esp_Lite_Core.h>
 #include "LedType.h"
 
@@ -74,7 +75,7 @@ private:
     ofsB = ledType->OfsB();
     ofsW = ledType->OfsW();
 
-    bitTicks = ledType->T0H() + ledType->T0L();
+    bitTicks = ledType->Periode();
 
     rmt_data_t s;
     s.level0 = 1; s.duration0 = ledType->T1H(); s.level1 = 0; s.duration1 = ledType->T1L();
@@ -115,7 +116,10 @@ public:
     pin = Pin;
     numLed = NumLed;
 
-    pixels = new uint8_t[numLed * bytesPx]();
+    // nothrow : sur ESP32, un new classique ne renvoie jamais nullptr en
+    // cas de manque de RAM, il fait planter la carte (reboot en boucle).
+    // Avec nothrow il renvoie nullptr, et les tests ci-dessous servent.
+    pixels = new (std::nothrow) uint8_t[numLed * bytesPx]();
     if (!pixels) {
       print("StripLed : echec alloc pixels");
       return;
@@ -124,9 +128,11 @@ public:
     symCount = numLed * bytesPx * 8;
     txDurUs = ((unsigned long)symCount * bitTicks) / 10;   // ticks de 0,1 us
 
-    sym = new rmt_data_t[symCount];
+    sym = new (std::nothrow) rmt_data_t[symCount];
     if (!sym) {
       print("StripLed : echec alloc RMT");
+      delete[] pixels;   // sinon perdu : un nouvel init() le reallouerait
+      pixels = nullptr;
       return;
     }
 

@@ -55,9 +55,21 @@ private:
 
 public:
 
+  // rx et tx sont obligatoires : la classe sait recevoir et emettre. dir
+  // peut valoir -1 quand le sens du transceiver est gere en dur. esp_dmx
+  // verifie le reste (broche existante, capable de sortie...).
   void init(int rx, int tx, int dir, Debug* deb = nullptr) {
     if (init_) return;
-    if ( rx + tx + dir < 3) return;
+
+    if (deb) {
+      debug = deb;
+      Adebug = true;
+    }
+
+    if (rx < 0 || tx < 0) {
+      print("Dmx : broche rx ou tx manquante");
+      return;
+    }
 
     TX_PIN  = tx;
     RX_PIN  = rx;
@@ -68,17 +80,21 @@ public:
     memset(txBuf, 0, sizeof(txBuf));
 
     dmx_config_t cfg = DMX_CONFIG_DEFAULT; // 250k 8N2
-    dmx_driver_install(DMX_PORT, &cfg, nullptr, 0);
-    dmx_set_pin(DMX_PORT, TX_PIN, RX_PIN, DERE_PIN);
-    
-    if (deb) {
-      debug = deb;
-      Adebug = true;
-      print("Init Dmx Ok");
-      print("Rx pin : " + String(RX_PIN));
-      print("Tx pin : " + String(TX_PIN));
-      print("Dir pin : " + String(DERE_PIN));
+    if (!dmx_driver_install(DMX_PORT, &cfg, nullptr, 0)) {
+      print("Dmx : echec installation driver");
+      return;
     }
+
+    if (!dmx_set_pin(DMX_PORT, TX_PIN, RX_PIN, DERE_PIN)) {
+      print("Dmx : broches invalides");
+      dmx_driver_delete(DMX_PORT);   // libere le port pour un nouvel essai
+      return;
+    }
+
+    print("Init Dmx Ok");
+    print("Rx pin : " + String(RX_PIN));
+    print("Tx pin : " + String(TX_PIN));
+    print("Dir pin : " + String(DERE_PIN));
 
     init_ = true;
   }
@@ -103,7 +119,9 @@ public:
     txMode = send;
   }
 
-  // Ecrit un canal du buffer d'emission. Sans effet si le mode reception est actif.
+  // Ecrit un canal du buffer d'emission. Accepte aussi en reception : rien
+  // ne part tant que setSendMode(true) n'est pas appele, ce qui permet de
+  // preparer la trame avant de basculer.
   void write(int ch, uint8_t value) {
     if (!init_) return;
     if (ch < 1 || ch > 512) return;
@@ -114,6 +132,14 @@ public:
     if (!init_) return;
 
     if (txMode) {
+      // En emission on n'ecoute plus le bus : sans ca, state() resterait
+      // fige sur la derniere presence constatee avant la bascule. Fait ici
+      // plutot que dans setSendMode() pour rester dans la tache de tick().
+      if (dmx_present) {
+        print("DMX : passage en emission");
+        dmx_present = false;
+      }
+
       if (!dmx_wait_sent(DMX_PORT, 0)) return;   // envoi precedent pas encore termine
       dmx_write(DMX_PORT, txBuf, DMX_PACKET_SIZE);
       dmx_send(DMX_PORT);

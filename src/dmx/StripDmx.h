@@ -1,4 +1,5 @@
 #pragma once
+#include <new>
 #include "../matricableLed/StripLed.h"
 #include "CSource.h"
 #include <Esp_Lite_Core.h>
@@ -207,11 +208,18 @@ public:
     Attache un ruban a un slot. L'adresse est celle du premier canal du
     ruban ; chaque ruban a la sienne, ce qui permet de les enchainer ou de
     les superposer librement.
+
+    L'adresse n'est pas bornee par la source : un canal au-dela de ce
+    qu'elle fournit est lu a 0, le ruban reste noir. L'ordre des init()
+    n'a ainsi aucune importance (CArtnet annonce 512 canaux tant qu'il
+    n'est pas initialise). getLastChanel() sert a verifier que la
+    configuration tient dans la source.
   */
   bool addStrip(StripLed* Strip, int index, int Addr) {
     if (!init_) return false;
     if (index < 0 || index >= MAX_STRIP) return false;
     if (!Strip) return false;
+    if (Addr < 1) return false;
     if (slot[index].strip) return false;        // slot deja pris
 
     int size = Strip->getStripSize();
@@ -219,14 +227,22 @@ public:
 
     MutexLock lock(ParamMtx);
 
+    // nothrow : voir StripLed::init(), un new classique planterait la carte.
+    uint8_t*  targ = new (std::nothrow) uint8_t[size * 4]();
+    uint16_t* cur  = new (std::nothrow) uint16_t[size * 4]();
+    if (!targ || !cur) {
+      delete[] targ;   // delete[] sur nullptr ne fait rien
+      delete[] cur;
+      return false;
+    }
+
     StripSlot& sl = slot[index];
-    sl.nCh = size * 4;
-    sl.targ = new uint8_t[sl.nCh]();
-    sl.cur  = new uint16_t[sl.nCh]();
-    if (!sl.targ || !sl.cur) return false;
+    sl.nCh  = size * 4;
+    sl.targ = targ;
+    sl.cur  = cur;
 
     sl.strip = Strip;
-    sl.addr  = (Addr >= 1 && Addr <= dmx->getMaxChanel()) ? Addr : 1;
+    sl.addr  = Addr;
     sl.group = 1.0f;
     sl.space = 0;
 
@@ -235,10 +251,10 @@ public:
 
   // ---- reglages par ruban -------------------------------------------
 
+  // Meme regle que addStrip() : pas de borne haute.
   void setAddr(int index, int Addr) {
     if (!validIndex(index)) return;
     if (Addr < 1) return;
-    if (Addr > dmx->getMaxChanel()) return;
     MutexLock lock(ParamMtx);
     slot[index].addr = Addr;
   }
@@ -327,6 +343,7 @@ public:
   void setTickFps(int fps) {
     if (!init_) return;
     if (fps < 1) return;
+    if (fps > 1000) fps = 1000;   // au-dela, l'intervalle tomberait a 0 ms et tick() ne rendrait plus rien
     MutexLock lock(ParamMtx);
     inter = 1000 / fps;
   }

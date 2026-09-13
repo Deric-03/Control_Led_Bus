@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <Esp_Lite_Core.h>
 #include "Color.h"
 
 enum Form {
@@ -19,99 +20,110 @@ struct Courbe {
   int decay = 0;
 };
 
+// Etat complet d'un effet, recopie d'un bloc par le rendu : une image ne
+// melange jamais deux reglages, meme si l'UI les change en cours de calcul.
+struct EffectState {
+  Courbe courbe;
+  Align align;
+  Color highValue;
+  Color lowValue;
+  int speed = 60;
+  bool run = false;
+  unsigned long t0 = 0;     // origine du cycle, en millis()
+};
+
+/*
+  Parametres d'un effet. Chaque methode prend le verrou de l'objet : on peut
+  les appeler depuis une autre tache que celle du rendu.
+
+  L'origine du cycle vit ici et non dans le rendu. Un meme effet pose sur
+  plusieurs selections, ou sur plusieurs rubans, reste ainsi en phase
+  partout, et reset() s'applique a toutes ses utilisations d'un coup.
+*/
 class Effect {
 private:
 
-  Courbe courbe;
+  EffectState state;
 
-  Align align;
-
-  Color highValue;
-
-  Color lowValue;
-
-  int speed = 60;
-
-  bool run = false;
-
-  bool resetPending = false;
+  mutable SemaphoreHandle_t mtx = NULL;
 
 public:
 
-  void setFrom(Form courb) { courbe.form = courb; }
+  Effect() { mtx = xSemaphoreCreateMutex(); }
 
-  void setWidth(int width) { courbe.width = width; }
+  ~Effect() { if (mtx) vSemaphoreDelete(mtx); }
 
-  void setAttack(int attack) { courbe.attack = attack; }
+  // Copie les reglages, pas le verrou : chaque instance garde le sien.
+  Effect(const Effect& o) : Effect() { state = o.getState(); }
 
-  void setDecay(int decay) { courbe.decay = decay; }
+  Effect& operator=(const Effect& o) {
+    if (this == &o) return *this;
+    EffectState s = o.getState();
+    MutexLock lock(mtx);
+    state = s;
+    return *this;
+  }
 
-  void setCourbe(Form courb, int width, int attack, int decay) { 
+  void setFrom(Form courb) { MutexLock lock(mtx); state.courbe.form = courb; }
 
-    courbe.form = courb; 
-    courbe.width = width;
-    courbe.attack = attack;
-    courbe.decay = decay;
-    
+  void setWidth(int width) { MutexLock lock(mtx); state.courbe.width = width; }
+
+  void setAttack(int attack) { MutexLock lock(mtx); state.courbe.attack = attack; }
+
+  void setDecay(int decay) { MutexLock lock(mtx); state.courbe.decay = decay; }
+
+  void setCourbe(Form courb, int width, int attack, int decay) {
+
+    MutexLock lock(mtx);
+    state.courbe.form = courb;
+    state.courbe.width = width;
+    state.courbe.attack = attack;
+    state.courbe.decay = decay;
 
   }
 
-  void setHighValue(Color color) { highValue = color; }
+  void setHighValue(Color color) { MutexLock lock(mtx); state.highValue = color; }
 
-  void setHighValue(int r, int g, int b, int w) {
+  void setHighValue(int r, int g, int b, int w) { setHighValue(Color{r, g, b, w}); }
 
-    highValue.r = r;
-    highValue.g = g;
-    highValue.b = b;
-    highValue.w = w;
+  void setLowValue(Color color) { MutexLock lock(mtx); state.lowValue = color; }
 
-  }
-
-  void setLowValue(Color color) { lowValue = color; }
-
-  void setLowValue(int r, int g, int b, int w) {
-
-    lowValue.r = r;
-    lowValue.g = g;
-    lowValue.b = b;
-    lowValue.w = w;
-
-  }
+  void setLowValue(int r, int g, int b, int w) { setLowValue(Color{r, g, b, w}); }
 
   void setAlign(int from, int to) {
-    align.from = from;
-    align.to = to;
+    MutexLock lock(mtx);
+    state.align.from = from;
+    state.align.to = to;
   }
 
-  void setAlign(int al) {
-    align.from = al;
-    align.to = al;
+  void setAlign(int al) { setAlign(al, al); }
+
+  void setSpeed(int spee) { MutexLock lock(mtx); state.speed = spee; }
+
+  // Front montant : l'effet repart du debut de son cycle. Un start(true)
+  // sur un effet deja lance ne change rien.
+  void start(bool st) {
+    MutexLock lock(mtx);
+    if (st && !state.run) state.t0 = millis();
+    state.run = st;
   }
 
-  void setSpeed(int spee) { speed = spee; }
+  // Ramene le cycle a son origine, pour toutes les selections qui utilisent
+  // cet effet.
+  void reset() { MutexLock lock(mtx); state.t0 = millis(); }
 
-  void start(bool st) { run = st; }
+  Courbe getCourbe() const { MutexLock lock(mtx); return state.courbe; }
 
-  void reset() { resetPending = true; }
+  Align getAlign() const { MutexLock lock(mtx); return state.align; }
 
-  Courbe getCourbe() { return courbe; } 
+  Color getHighValue() const { MutexLock lock(mtx); return state.highValue; }
 
-  Align getAlign() { return align; }
+  Color getLowValue() const { MutexLock lock(mtx); return state.lowValue; }
 
-  Color getHighValue() { return highValue; }
+  int getSpeed() const { MutexLock lock(mtx); return state.speed; }
 
-  Color getLowValue() { return lowValue; }
+  bool getRun() const { MutexLock lock(mtx); return state.run; }
 
-  int getSpeed() { return speed; }
+  EffectState getState() const { MutexLock lock(mtx); return state; }
 
-  bool getRun() { return run; }
-
-  bool hasReset() { 
-    if (resetPending) {
-      resetPending = false;
-      return true;
-    }
-    return false;
-  }
-  
 };

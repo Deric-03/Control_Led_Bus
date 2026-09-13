@@ -17,4 +17,4 @@ inline Color baseCyan = {0, 255, 255, 0};
 
 inline Color baseMagenta = {255, 0, 255, 0};
 
-inline Color baseYellow = {0, 255, 255, 0};
+inline Color baseYellow = {255, 255, 0, 0};

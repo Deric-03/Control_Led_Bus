@@ -23,8 +23,9 @@
     Effect       -- parametres d'un effet (forme, vitesse, dephasage)
     ManualRender -- applique presets et effets sur un ruban
 
-  Depend de Esp_Lite_Core (Debug, mutex) et de esp_dmx : les deux sont
-  tirees ici, un seul #include suffit donc cote sketch.
+  Depend de Esp_Lite_Core (Debug, mutex) et de Wifi_Lite_Esp (tiree par
+  CArtnet) : les deux sont incluses ici, un seul #include suffit donc cote
+  sketch. esp_dmx est integre dans third_party/, rien a installer a part.
 */
 
 #include <Esp_Lite_Core.h>

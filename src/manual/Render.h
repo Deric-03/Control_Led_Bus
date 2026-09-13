@@ -1,5 +1,7 @@
 #pragma once
 #include <Arduino.h>
+#include <new>
+#include <Esp_Lite_Core.h>
 #include "Select.h"
 #include "Effect.h"
 #include "Preset.h"
@@ -30,6 +32,11 @@
 
   attack et decay s'appliquent a toutes les formes, sinus compris, ou ils
   penchent la courbe. MA2 les reserve aux formes a fronts durs : ecart assume.
+
+  Taches : toutes les methodes publiques peuvent etre appelees depuis une
+  autre tache que celle de tick(). Au retour de removePreset(),
+  removeEffect() ou clear(), le rendu ne lit plus les objets retires : on
+  peut les detruire. Un objet encore enregistre ne doit jamais l'etre.
 */
 
 struct RenderPreset {
@@ -40,8 +47,6 @@ struct RenderPreset {
 struct RenderEffect {
   Effect* effect = nullptr;
   Select* select = nullptr;
-  unsigned long t0 = 0;     // origine du cycle
-  bool wasRun = false;      // etat precedent, pour detecter le front de start()
 };
 
 class ManualRender {
@@ -59,8 +64,12 @@ private:
 
   int nbEffect = 0;
 
+  SemaphoreHandle_t ParamMtx = NULL;
+
   unsigned long update = 0; //Fps Timer
   int inter = 16; //Frame Interval 60fps (ms)
+
+  bool gamma = false;
 
   bool pending = false;     // image calculee en attente d'envoi
 
@@ -162,76 +171,82 @@ private:
     if (!rp.preset || !rp.select) return;
 
     Color c = rp.preset->getColor();
-    int nb = rp.select->count();
-
-    for (int k = 0; k < nb; k++) accWrite(rp.select->getSelect(k), c);
+    rp.select->forEach([&](int, int, int led) { accWrite(led, c); });
   }
 
-  void renderEffect(RenderEffect& re, unsigned long now) {
+  void renderEffect(RenderEffect& re) {
     if (!re.effect || !re.select) return;
 
-    bool run = re.effect->getRun();
+    EffectState e = re.effect->getState();
+    if (!e.run || e.speed == 0) return;
 
-    // Front montant de start() : l'effet demarre au debut de son cycle.
-    if (run && !re.wasRun) re.t0 = now;
-    re.wasRun = run;
-
-    // Le drapeau se consomme meme a l'arret, sinon un reset() demande
-    // pendant la pause s'appliquerait au redemarrage suivant.
-    if (re.effect->hasReset()) re.t0 = now;
-    if (!run) return;
-
-    int speed = re.effect->getSpeed();
-    if (speed == 0) return;
-
-    unsigned long period = 60000UL / (unsigned long)abs(speed);
+    unsigned long period = 60000UL / (unsigned long)abs(e.speed);
     if (period == 0) period = 1;
 
-    uint16_t t = (uint16_t)(((now - re.t0) % period) * 65536UL / period);
-    if (speed < 0) t = (uint16_t)(65535 - t);
+    // millis() est lu APRES l'instantane : un start() ou un reset() arrive
+    // d'une autre tache juste avant aurait sinon une origine dans le futur,
+    // et l'ecart non signe vaudrait ~4 milliards.
+    unsigned long now = millis();
+    uint16_t t = (uint16_t)(((now - e.t0) % period) * 65536UL / period);
+    if (e.speed < 0) t = (uint16_t)(65535 - t);
 
-    Courbe c  = re.effect->getCourbe();
-    Align  al = re.effect->getAlign();
-    Color  lo = re.effect->getLowValue();
-    Color  hi = re.effect->getHighValue();
+    int span = e.align.to - e.align.from;
 
-    int nb = re.select->count();
-    int span = al.to - al.from;
-
-    for (int k = 0; k < nb; k++) {
+    re.select->forEach([&](int k, int nb, int led) {
 
       // Ecart divise par le NOMBRE de LEDs, pas par nb - 1 : to est le point
       // de bouclage, donc 0 a 360 se repartit sans doublon (comme MA2).
-      int deg = al.from + (span * k) / nb;
+      int deg = e.align.from + (span * k) / nb;
       deg %= 360;
       if (deg < 0) deg += 360;
       uint16_t ph = (uint16_t)(((uint32_t)deg * 65536UL) / 360);
 
       // Phase sur 16 bits : le rebouclage est le debordement du uint16_t.
-      uint8_t v = curveAt(c, (uint16_t)(t + ph));
-      accWrite(re.select->getSelect(k), mixColor(lo, hi, v));
-    }
+      uint8_t v = curveAt(e.courbe, (uint16_t)(t + ph));
+      accWrite(led, mixColor(e.lowValue, e.highValue, v));
+    });
   }
 
-  void flush() {
+  // Le gamma s'applique apres la fusion HTP : une fois par LED, et non une
+  // fois par couche. La courbe etant croissante, le resultat est le meme.
+  void flush(bool Gamma) {
     int n = accSize / 4;
     for (int i = 0; i < n; i++) {
       uint8_t* p = acc + (i * 4);
-      strip->setPixel(i, p[0], p[1], p[2], p[3]);
+      if (Gamma) {
+        strip->setPixel(i, strip->gamma8(p[0]), strip->gamma8(p[1]),
+                           strip->gamma8(p[2]), strip->gamma8(p[3]));
+      } else {
+        strip->setPixel(i, p[0], p[1], p[2], p[3]);
+      }
     }
   }
 
 public:
 
+  ManualRender() { ParamMtx = xSemaphoreCreateMutex(); }
+
+  ~ManualRender() {
+    delete[] acc;
+    if (ParamMtx) vSemaphoreDelete(ParamMtx);
+  }
+
+  // Un rendu possede son accumulateur et pointe vers un ruban : le copier
+  // n'a pas de sens.
+  ManualRender(const ManualRender&) = delete;
+  ManualRender& operator=(const ManualRender&) = delete;
+
   bool addStrip(StripLed* str) {
-    if (strip) return false;          // deja attache
     if (!str) return false;
 
     int n = str->getStripSize();
     if (n < 1) return false;
 
+    MutexLock lock(ParamMtx);
+    if (strip) return false;          // deja attache
+
     accSize = n * 4;
-    acc = new uint8_t[accSize]();
+    acc = new (std::nothrow) uint8_t[accSize]();   // voir StripLed::init()
     if (!acc) {
       accSize = 0;
       return false;
@@ -245,8 +260,10 @@ public:
 
   bool addPreset(Preset* pres, Select* select) {
 
-    if (nbPreset >= MAX_RENDER) return false;
     if (!pres || !select) return false;
+
+    MutexLock lock(ParamMtx);
+    if (nbPreset >= MAX_RENDER) return false;
 
     preset[nbPreset].preset = pres;
     preset[nbPreset].select = select;
@@ -254,12 +271,38 @@ public:
     return true;
   }
 
-  int getNbPreset() { return nbPreset; }
+  /*
+    Retire un preset du rendu : sans select, de toutes ses selections ; avec,
+    de ce couple seulement. Renvoie false si rien n'a ete trouve.
+  */
+  bool removePreset(Preset* pres, Select* select = nullptr) {
+    if (!pres) return false;
+    MutexLock lock(ParamMtx);
+
+    // On tasse la table en ne gardant que ce qui ne correspond pas.
+    int kept = 0;
+    for (int i = 0; i < nbPreset; i++) {
+      bool hit = (preset[i].preset == pres) && (!select || preset[i].select == select);
+      if (!hit) preset[kept++] = preset[i];
+    }
+
+    bool found = (kept != nbPreset);
+    nbPreset = kept;
+    return found;
+  }
+
+  int getNbPreset() {
+    MutexLock lock(ParamMtx);
+    int out = nbPreset;
+    return out;
+  }
 
   bool addEffect(Effect* eff, Select* select) {
 
-    if (nbEffect >= MAX_RENDER) return false;
     if (!eff || !select) return false;
+
+    MutexLock lock(ParamMtx);
+    if (nbEffect >= MAX_RENDER) return false;
 
     effect[nbEffect].effect = eff;
     effect[nbEffect].select = select;
@@ -267,33 +310,96 @@ public:
     return true;
   }
 
-  int getNbEffect() { return nbEffect; }
+  // Meme regle que removePreset().
+  bool removeEffect(Effect* eff, Select* select = nullptr) {
+    if (!eff) return false;
+    MutexLock lock(ParamMtx);
+
+    int kept = 0;
+    for (int i = 0; i < nbEffect; i++) {
+      bool hit = (effect[i].effect == eff) && (!select || effect[i].select == select);
+      if (!hit) effect[kept++] = effect[i];
+    }
+
+    bool found = (kept != nbEffect);
+    nbEffect = kept;
+    return found;
+  }
+
+  int getNbEffect() {
+    MutexLock lock(ParamMtx);
+    int out = nbEffect;
+    return out;
+  }
+
+  // Retire tous les presets et effets : le ruban s'eteint a l'image suivante.
+  void clear() {
+    MutexLock lock(ParamMtx);
+    nbPreset = 0;
+    nbEffect = 0;
+  }
 
   void setTickFps(int fps) {
 
     if (fps < 1) return;
+    if (fps > 1000) fps = 1000;   // au-dela, l'intervalle tomberait a 0 ms
 
+    MutexLock lock(ParamMtx);
     inter = 1000 / fps;
 
   }
 
-  int getTickFps() { return (inter > 0) ? (1000 / inter) : 0; }
+  int getTickFps() {
+    MutexLock lock(ParamMtx);
+    int out = (inter > 0) ? (1000 / inter) : 0;
+    return out;
+  }
+
+  // Corrige la reponse lineaire du PWM, comme StripDmx::setGamma().
+  void setGamma(bool on) {
+    MutexLock lock(ParamMtx);
+    gamma = on;
+  }
+
+  bool getGamma() {
+    MutexLock lock(ParamMtx);
+    bool out = gamma;
+    return out;
+  }
 
   void tick() {
 
-    if (!strip || !acc) return;
+    StripLed* Strip;
+    int Inter;
+    bool Gamma;
+    {
+      MutexLock lock(ParamMtx);
+      Strip = strip;
+      Inter = inter;
+      Gamma = gamma;
+    }
 
-    if (millis() - update >= (unsigned long)inter) {
+    if (!Strip) return;
+
+    if (millis() - update >= (unsigned long)Inter) {
       update = millis();
 
-      // Tout est reconstruit a chaque image : une LED qui sort d'une
-      // selection doit s'eteindre, pas garder sa derniere couleur.
-      memset(acc, 0, accSize);
+      {
+        // A la difference de StripDmx, le verrou couvre tout le calcul de
+        // l'image : les tables contiennent des pointeurs, et removeEffect()
+        // doit garantir a son retour que l'objet retire n'est plus lu.
+        // L'ecriture sur le ruban et l'envoi restent hors verrou.
+        MutexLock lock(ParamMtx);
 
-      for (int i = 0; i < nbPreset; i++) renderPreset(preset[i]);
-      for (int i = 0; i < nbEffect;  i++) renderEffect(effect[i], update);
+        // Tout est reconstruit a chaque image : une LED qui sort d'une
+        // selection doit s'eteindre, pas garder sa derniere couleur.
+        memset(acc, 0, accSize);
 
-      flush();
+        for (int i = 0; i < nbPreset; i++) renderPreset(preset[i]);
+        for (int i = 0; i < nbEffect;  i++) renderEffect(effect[i]);
+      }
+
+      flush(Gamma);
       pending = true;
     }
 
