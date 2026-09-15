@@ -6,6 +6,8 @@
 #include "Effect.h"
 #include "Preset.h"
 #include "../matricableLed/StripLed.h"
+#include "soc/soc_caps.h"
+
 
 /*
   Moteur de rendu du mode manuel.
@@ -19,6 +21,12 @@
   Le rendu passe par un accumulateur avant d'atteindre le ruban : sans lui,
   le HTP demanderait de relire les pixels deja ecrits, ce que StripLed
   n'expose pas.
+
+  Plusieurs rubans peuvent etre attaches. Ils partagent alors un espace
+  d'index unique, comme les rubans de StripDmx partagent l'espace de canaux :
+  celui attache a l'offset 100 recoit les index 100 et suivants. Une Select
+  ignore donc les coupures, et un effet balaye plusieurs rubans d'un seul
+  tenant. Deux rubans au meme offset sont en miroir.
 
   Unites :
     speed  -- cycles par minute (60 = un cycle par seconde), negatif = sens
@@ -49,10 +57,21 @@ struct RenderEffect {
   Select* select = nullptr;
 };
 
+struct RenderStrip {
+  StripLed* strip = nullptr;
+  int offset = 0;           // index global de sa premiere LED
+  int size   = 0;
+  bool pending = false;     // image calculee en attente d'envoi
+};
+
 class ManualRender {
 private:
 
-  StripLed* strip = nullptr;
+  // Autant de rubans que de canaux RMT en emission sur la cible, comme
+  // StripDmx : 2 sur C3, 8 sur un ESP32 classique, 4 sur S3...
+  static const int MAX_STRIP = SOC_RMT_TX_CANDIDATES_PER_GROUP;
+
+  RenderStrip stripSlot[MAX_STRIP];
 
   static const int MAX_RENDER = 30;
 
@@ -71,9 +90,8 @@ private:
 
   bool gamma = false;
 
-  bool pending = false;     // image calculee en attente d'envoi
-
-  // Image en construction, 4 octets par LED (r, g, b, w).
+  // Image en construction, 4 octets par LED (r, g, b, w). Elle couvre tout
+  // l'espace d'index, de 0 a la derniere LED du ruban le plus eloigne.
   uint8_t* acc = nullptr;
   int accSize = 0;
 
@@ -165,6 +183,18 @@ private:
     htp(p[3], c.w);
   }
 
+  // Fin de l'espace d'index, tous rubans confondus. Sans verrou : les
+  // appelants le tiennent deja.
+  int spanLocked() const {
+    int end = 0;
+    for (int s = 0; s < MAX_STRIP; s++) {
+      if (!stripSlot[s].strip) continue;
+      int e = stripSlot[s].offset + stripSlot[s].size;
+      if (e > end) end = e;
+    }
+    return end;
+  }
+
   // ---- rendu ----------------------------------------------------------
 
   void renderPreset(RenderPreset& rp) {
@@ -210,52 +240,113 @@ private:
   // Le gamma s'applique apres la fusion HTP : une fois par LED, et non une
   // fois par couche. La courbe etant croissante, le resultat est le meme.
   void flush(bool Gamma) {
-    int n = accSize / 4;
-    for (int i = 0; i < n; i++) {
-      uint8_t* p = acc + (i * 4);
-      if (Gamma) {
-        strip->setPixel(i, strip->gamma8(p[0]), strip->gamma8(p[1]),
-                           strip->gamma8(p[2]), strip->gamma8(p[3]));
-      } else {
-        strip->setPixel(i, p[0], p[1], p[2], p[3]);
+    for (int s = 0; s < MAX_STRIP; s++) {
+
+      RenderStrip& rs = stripSlot[s];
+      if (!rs.strip) continue;
+
+      for (int i = 0; i < rs.size; i++) {
+        int g = rs.offset + i;
+        if ((g * 4 + 3) >= accSize) break;
+
+        uint8_t* p = acc + (g * 4);
+        if (Gamma) {
+          rs.strip->setPixel(i, rs.strip->gamma8(p[0]), rs.strip->gamma8(p[1]),
+                                rs.strip->gamma8(p[2]), rs.strip->gamma8(p[3]));
+        } else {
+          rs.strip->setPixel(i, p[0], p[1], p[2], p[3]);
+        }
       }
+
+      rs.pending = true;
     }
   }
 
 public:
 
-  ManualRender() { ParamMtx = xSemaphoreCreateMutex(); }
+  ManualRender() {
+    ParamMtx = xSemaphoreCreateMutex();
+    buildSinus();
+  }
+
 
   ~ManualRender() {
     delete[] acc;
     if (ParamMtx) vSemaphoreDelete(ParamMtx);
   }
 
-  // Un rendu possede son accumulateur et pointe vers un ruban : le copier
+  // Un rendu possede son accumulateur et pointe vers des rubans : le copier
   // n'a pas de sens.
   ManualRender(const ManualRender&) = delete;
   ManualRender& operator=(const ManualRender&) = delete;
 
-  bool addStrip(StripLed* str) {
+  // Forme courante : les rubans s'enchainent dans l'ordre des appels, le
+  // premier a l'index 0 et a l'offset 0, le suivant juste derriere.
+  bool addStrip(StripLed* str) { return addStrip(str, -1, -1); }
+
+  /*
+    Forme complete. index vise un slot precis, -1 prend le premier libre.
+
+    Offset est l'index global de la premiere LED du ruban, l'equivalent de
+    l'adresse DMX dans StripDmx ; -1 le place a la suite du plus eloigne.
+    Le renseigner ne sert qu'a deux choses : laisser un trou dans l'espace
+    d'index, ou donner le meme offset a deux rubans pour qu'ils affichent
+    la meme chose.
+  */
+  bool addStrip(StripLed* str, int index, int Offset) {
     if (!str) return false;
+    if (index >= MAX_STRIP) return false;
 
     int n = str->getStripSize();
     if (n < 1) return false;
 
     MutexLock lock(ParamMtx);
-    if (strip) return false;          // deja attache
 
-    accSize = n * 4;
-    acc = new (std::nothrow) uint8_t[accSize]();   // voir StripLed::init()
-    if (!acc) {
-      accSize = 0;
-      return false;
+    if (index < 0) {
+      index = 0;
+      while (index < MAX_STRIP && stripSlot[index].strip) index++;
+      if (index >= MAX_STRIP) return false;
     }
 
-    buildSinus();
+    if (stripSlot[index].strip) return false;   // slot deja pris
 
-    strip = str;
+    int ofs = (Offset < 0) ? spanLocked() : Offset;
+
+    // L'accumulateur couvre tout l'espace d'index, il grandit donc avec le
+    // ruban le plus eloigne. flush() le lit sous ce meme verrou, la
+    // reallocation est sans danger pour le rendu.
+    int span = spanLocked();
+    if (ofs + n > span) span = ofs + n;
+
+    if (span * 4 > accSize) {
+      uint8_t* na = new (std::nothrow) uint8_t[span * 4]();   // voir StripLed::init()
+      if (!na) return false;
+      delete[] acc;
+      acc = na;
+      accSize = span * 4;
+    }
+
+    // Le pointeur est ecrit en dernier : la boucle d'envoi de tick() lit les
+    // slots hors verrou, elle doit voir soit nullptr, soit un slot complet.
+    stripSlot[index].offset  = ofs;
+    stripSlot[index].size    = n;
+    stripSlot[index].pending = false;
+    stripSlot[index].strip   = str;
     return true;
+  }
+
+  int getStripCount() {
+    MutexLock lock(ParamMtx);
+    int n = 0;
+    for (int s = 0; s < MAX_STRIP; s++) if (stripSlot[s].strip) n++;
+    return n;
+  }
+
+  // Taille de l'espace d'index. C'est la capacite a donner a une Select qui
+  // doit pouvoir designer n'importe quelle LED du rig.
+  int getSpan() {
+    MutexLock lock(ParamMtx);
+    return spanLocked();
   }
 
   bool addPreset(Preset* pres, Select* select) {
@@ -369,17 +460,13 @@ public:
 
   void tick() {
 
-    StripLed* Strip;
     int Inter;
     bool Gamma;
     {
       MutexLock lock(ParamMtx);
-      Strip = strip;
       Inter = inter;
       Gamma = gamma;
     }
-
-    if (!Strip) return;
 
     if (millis() - update >= (unsigned long)Inter) {
       update = millis();
@@ -388,24 +475,34 @@ public:
         // A la difference de StripDmx, le verrou couvre tout le calcul de
         // l'image : les tables contiennent des pointeurs, et removeEffect()
         // doit garantir a son retour que l'objet retire n'est plus lu.
-        // L'ecriture sur le ruban et l'envoi restent hors verrou.
+        // flush() est dedans aussi, parce que addStrip() peut reallouer
+        // l'accumulateur. Seul l'envoi reste hors verrou.
         MutexLock lock(ParamMtx);
 
-        // Tout est reconstruit a chaque image : une LED qui sort d'une
-        // selection doit s'eteindre, pas garder sa derniere couleur.
-        memset(acc, 0, accSize);
+        if (acc) {
+          // Tout est reconstruit a chaque image : une LED qui sort d'une
+          // selection doit s'eteindre, pas garder sa derniere couleur.
+          memset(acc, 0, accSize);
 
-        for (int i = 0; i < nbPreset; i++) renderPreset(preset[i]);
-        for (int i = 0; i < nbEffect;  i++) renderEffect(effect[i]);
+          for (int i = 0; i < nbPreset; i++) renderPreset(preset[i]);
+          for (int i = 0; i < nbEffect;  i++) renderEffect(effect[i]);
+
+          flush(Gamma);
+        }
       }
-
-      flush(Gamma);
-      pending = true;
     }
 
     // Reessai a chaque passage jusqu'a ce que le RMT se libere : attendre
     // l'intervalle suivant diviserait la cadence reelle par deux.
-    if (pending && strip->show()) pending = false;
+    //
+    // Le drapeau est par ruban : deux rubans de longueurs differentes ne se
+    // liberent pas ensemble, et un drapeau global les ferait se reemettre
+    // mutuellement en boucle sans jamais se synchroniser.
+    for (int s = 0; s < MAX_STRIP; s++) {
+      RenderStrip& rs = stripSlot[s];
+      if (!rs.strip || !rs.pending) continue;
+      if (rs.strip->show()) rs.pending = false;
+    }
   }
 
 };

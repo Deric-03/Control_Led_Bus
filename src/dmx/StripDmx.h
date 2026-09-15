@@ -215,17 +215,31 @@ public:
     n'est pas initialise). getLastChanel() sert a verifier que la
     configuration tient dans la source.
   */
+  // Forme courante : les rubans prennent les index dans l'ordre des appels.
+  // L'adresse, elle, reste toujours explicite -- c'est le plan de patch.
+  bool addStrip(StripLed* Strip, int Addr) { return addStrip(Strip, -1, Addr); }
+
+  // Forme complete : index vise un slot precis, -1 prend le premier libre.
   bool addStrip(StripLed* Strip, int index, int Addr) {
     if (!init_) return false;
-    if (index < 0 || index >= MAX_STRIP) return false;
+    if (index >= MAX_STRIP) return false;
     if (!Strip) return false;
     if (Addr < 1) return false;
-    if (slot[index].strip) return false;        // slot deja pris
 
     int size = Strip->getStripSize();
     if (size < 1) return false;
 
     MutexLock lock(ParamMtx);
+
+    // Le slot est cherche et teste sous verrou : deux addStrip() concurrents
+    // se voyaient l'un l'autre libre et se battaient pour le meme index.
+    if (index < 0) {
+      index = 0;
+      while (index < MAX_STRIP && slot[index].strip) index++;
+      if (index >= MAX_STRIP) return false;
+    }
+
+    if (slot[index].strip) return false;        // slot deja pris
 
     // nothrow : voir StripLed::init(), un new classique planterait la carte.
     uint8_t*  targ = new (std::nothrow) uint8_t[size * 4]();
@@ -426,18 +440,22 @@ public:
       }
     }
 
-    if (dmx->hasNewFrame()) {
-      for (int s = 0; s < MAX_STRIP; s++) {
-        if (slot[s].strip) readSlot(s, Group[s], Space[s], Addr[s], Snap);
-      }
-    }
-
     if (Inter <= 0) return;
 
-    // Le rendu suit la cadence demandee : c'est lui qui fait avancer le
-    // lissage, il ne doit surtout pas tourner plus vite.
+    // Lecture et rendu partagent la cadence. Lire des que la source publie
+    // ferait tourner readSlot une fois par PAQUET -- 16 fois par image a 16
+    // univers -- pour un resultat que le rendu n'echantillonne qu'une fois.
+    // Le drapeau de hasNewFrame() est collant, il attend donc ici sans rien
+    // perdre. Le lissage, lui, ne doit surtout pas tourner plus vite.
     if (millis() - update >= (unsigned long)Inter) {
       update = millis();
+
+      if (dmx->hasNewFrame()) {
+        for (int s = 0; s < MAX_STRIP; s++) {
+          if (slot[s].strip) readSlot(s, Group[s], Space[s], Addr[s], Snap);
+        }
+      }
+
       for (int s = 0; s < MAX_STRIP; s++) {
         if (!slot[s].strip) continue;
         renderSlot(s, Group[s], Space[s], Alpha, Gamma);

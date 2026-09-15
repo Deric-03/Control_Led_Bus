@@ -19,7 +19,7 @@ private:
 
   static const int ART_PORT = 6454;
   static const int UNI_SIZE = 512;
-  static const int MAX_UNI  = 4;     // plage maximale bufferisee
+  static const int MAX_UNI  = 16;    // plage maximale bufferisee : 2 x 8 ko
 
   AsyncUDP udp;
 
@@ -53,12 +53,17 @@ private:
 
   // Publie l'image accumulee et repart de son contenu, pour que les univers
   // absents a la prochaine image gardent leur derniere valeur connue.
-  void publish() {
+  // Seul le creneau qui vient d'etre ecrit differe entre les deux tampons :
+  // recopier le reste coutait MAX_UNI x 512 octets par paquet, quel que soit
+  // le nombre d'univers reellement exploites.
+  void publish(int idx) {
     uint8_t* tmp = front;
     front = back;   // ecriture de pointeur alignee = atomique en 32 bits
     back = tmp;
 
-    memcpy(back, front, sizeof(bufA));
+    int ofs = 1 + (idx * UNI_SIZE);
+    memcpy(back + ofs, front + ofs, UNI_SIZE);
+
     newFrame = true;
   }
 
@@ -130,7 +135,7 @@ private:
     // publish() recopiant l'image publiee vers le tampon d'accumulation,
     // les univers non recus conservent leur derniere valeur : au pire un
     // univers a une trame de retard sur l'autre, ce qui est invisible.
-    publish();
+    publish(idx);
   }
 
 public:

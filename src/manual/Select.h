@@ -1,36 +1,54 @@
 #pragma once
 #include <Arduino.h>
+#include <new>
 #include <Esp_Lite_Core.h>
 
-// Liste ordonnee de LEDs. Protegee par un verrou : on peut la modifier
-// depuis une autre tache pendant que le rendu la parcourt.
+/*
+  Liste ordonnee de LEDs. Protegee par un verrou : on peut la modifier depuis
+  une autre tache pendant que le rendu la parcourt.
+
+  La capacite est le nombre de LEDs que la liste peut CONTENIR, pas l'index
+  le plus grand qu'elle peut designer. Une selection de 20 LEDs au milieu
+  d'un rig de 2000 coute 40 octets, pas 4 ko. Les index ne sont donc plus
+  bornes ici : le rendu ecarte de lui-meme ceux qui tombent hors des rubans.
+*/
 class Select {
 private:
 
-  static const int MAX_LED  = 512;
-
+  int cap = 0;              // fixe a la construction, ne change jamais
   int nbSelect = 0;
 
-  uint16_t buf[MAX_LED];
+  uint16_t* buf = nullptr;
 
   mutable SemaphoreHandle_t mtx = NULL;
 
 public:
 
-  Select() { mtx = xSemaphoreCreateMutex(); }
+  explicit Select(int capacity = 512) {
+    mtx = xSemaphoreCreateMutex();
+    if (capacity < 1) capacity = 1;
+    buf = new (std::nothrow) uint16_t[capacity];   // voir StripLed::init()
+    if (buf) cap = capacity;
+  }
 
-  ~Select() { if (mtx) vSemaphoreDelete(mtx); }
+  ~Select() {
+    delete[] buf;
+    if (mtx) vSemaphoreDelete(mtx);
+  }
 
   // Copie la liste, pas le verrou : chaque instance garde le sien. L'objet
   // neuf n'est encore connu de personne, seul celui de la source compte.
-  Select(const Select& o) : Select() {
+  // cap est fixe a la construction, le lire sans verrou est sans risque.
+  Select(const Select& o) : Select(o.cap) {
+    if (!buf) return;
     MutexLock lock(o.mtx);
-    nbSelect = o.nbSelect;
+    nbSelect = (o.nbSelect < cap) ? o.nbSelect : cap;
     memcpy(buf, o.buf, nbSelect * sizeof(uint16_t));
   }
 
   Select& operator=(const Select& o) {
     if (this == &o) return *this;
+    if (!buf) return *this;
 
     // Deux verrous, toujours pris dans le meme ordre (par adresse) : sinon
     // a = b et b = a lances en parallele s'interbloqueraient.
@@ -38,28 +56,35 @@ public:
     MutexLock l1(thisFirst ? mtx : o.mtx);
     MutexLock l2(thisFirst ? o.mtx : mtx);
 
-    nbSelect = o.nbSelect;
+    // Les capacites peuvent differer : on ne garde que ce qui tient.
+    nbSelect = (o.nbSelect < cap) ? o.nbSelect : cap;
     memcpy(buf, o.buf, nbSelect * sizeof(uint16_t));
     return *this;
   }
 
-  int getMaxLed() const { return MAX_LED; }
+  int getCapacity() const { return cap; }
 
   void clear() { MutexLock lock(mtx); nbSelect = 0; }
 
   void select(int led) {
     MutexLock lock(mtx);
-    if (led < 0 || led >= MAX_LED) { nbSelect = 0; return; }
-    buf[0] = led;
+    nbSelect = 0;
+    if (!buf || led < 0) return;
+    buf[0] = (uint16_t)led;
     nbSelect = 1;
   }
 
+  // Une plage plus longue que la capacite est refusee plutot que tronquee :
+  // une selection amputee en silence se voit sur le ruban, pas dans le code.
   void select(int led, int thru) {
     MutexLock lock(mtx);
-    if (led < 0 || thru >= MAX_LED || thru < led) { nbSelect = 0; return; }
+    nbSelect = 0;
+    if (!buf || led < 0 || thru < led) return;
 
     int nb = thru - led + 1;
-    for (int i = 0; i < nb; i++) buf[i] = led + i;
+    if (nb > cap) return;
+
+    for (int i = 0; i < nb; i++) buf[i] = (uint16_t)(led + i);
     nbSelect = nb;
   }
 
