@@ -6,17 +6,7 @@
 */
 
 #include <Control_Led_Bus.h>
-
-// 1 = CWifi (bibliotheque Network_Lite_Esp) : reconnexion geree, reglages
-//     conserves en NVS.
-// 0 = WiFi du core ESP32, rien a installer.
-#define USE_CWIFI 1
-
-#if USE_CWIFI
-#include <Wifi_Lite_Esp.h>
-#else
 #include <WiFi.h>
-#endif
 
 const int PIN_STRIP = 10;   // a adapter a ta carte
 
@@ -25,10 +15,6 @@ const char* WIFI_PASS = "MotDePasse";
 
 Debug debug;
 CArtnet artnet;
-
-#if USE_CWIFI
-CWifi wifi;
-#endif
 
 StripLed strip;
 StripDmx link;
@@ -41,16 +27,9 @@ void setup() {
 
   strip.init(PIN_STRIP, 64, &debug);
 
-#if USE_CWIFI
-  wifi.initHOST("ControlLedBus");
-  wifi.initSSID(WIFI_SSID);
-  wifi.initPASSWORD(WIFI_PASS);
-  wifi.initWifi(&debug);
-#else
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);               // la mise en veille du WiFi retarde les paquets
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-#endif
+  WiFi.begin(WIFI_SSID, WIFI_PASS);   // le core se reconnecte seul
 
   artnet.init(&debug, 0, 1);
 
@@ -76,9 +55,6 @@ void setup() {
 }
 
 void loop() {
-#if USE_CWIFI
-  wifi.connectTick();
-#endif
   artnet.tick();
 
   // Un seul moteur a la fois sur un meme ruban : deux tick() enverraient

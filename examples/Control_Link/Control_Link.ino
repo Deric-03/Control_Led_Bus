@@ -14,12 +14,7 @@
 // 1 = Art-Net en WiFi, 0 = DMX physique
 #define SOURCE_ARTNET 1
 
-// En Art-Net : 1 = CWifi (bibliotheque Network_Lite_Esp), 0 = WiFi du core
-#define USE_CWIFI 1
-
-#if SOURCE_ARTNET && USE_CWIFI
-#include <Wifi_Lite_Esp.h>
-#elif SOURCE_ARTNET
+#if SOURCE_ARTNET
 #include <WiFi.h>
 #endif
 
@@ -35,9 +30,6 @@ StripDmx link;
 const char* WIFI_SSID = "MonReseau";    // a adapter
 const char* WIFI_PASS = "MotDePasse";
 CArtnet source;
-#if USE_CWIFI
-CWifi wifi;
-#endif
 #else
 const int PIN_RX  = 1;
 const int PIN_TX  = 3;
@@ -52,16 +44,9 @@ void setup() {
   stripB.init(PIN_B, 64, &debug);
 
 #if SOURCE_ARTNET
-#if USE_CWIFI
-  wifi.initHOST("ControlLedBus");
-  wifi.initSSID(WIFI_SSID);
-  wifi.initPASSWORD(WIFI_PASS);
-  wifi.initWifi(&debug);
-#else
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);               // la mise en veille du WiFi retarde les paquets
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-#endif
+  WiFi.begin(WIFI_SSID, WIFI_PASS);   // le core se reconnecte seul
   source.init(&debug, 0, 1);          // univers 0
 #else
   source.init(PIN_RX, PIN_TX, PIN_DIR, &debug);
@@ -84,9 +69,6 @@ void setup() {
 }
 
 void loop() {
-#if SOURCE_ARTNET && USE_CWIFI
-  wifi.connectTick();
-#endif
   source.tick();
   link.tick();
 }
