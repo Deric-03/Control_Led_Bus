@@ -37,7 +37,7 @@ Pensée pour le spectacle : sortie non bloquante, plusieurs rubans en parallèle
 ## Compatibilité
 
 - ESP32, ESP32-S3, ESP32-C3… avec le core **arduino-esp32 3.x**.
-- Dépend de la bibliothèque **Esp_Lite_Core**.
+- Dépend de la bibliothèque [Esp_Lite_Core](https://github.com/Deric-03/Esp_Lite_Core).
 - [esp_dmx](https://github.com/someweisguy/esp_dmx) est intégré dans `src/third_party/`, rien à installer à part.
 - La connexion réseau est laissée au sketch : l'Art-Net écoute sur n'importe quelle interface. Les exemples proposent au choix `CWifi` (bibliothèque Network_Lite_Esp) ou le WiFi du core ESP32.
 
